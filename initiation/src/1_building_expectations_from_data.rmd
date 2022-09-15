@@ -1,0 +1,130 @@
+---
+title: "Building expectations from the public 510(k) database"
+author: "Ozan Aygun"
+date: "9/14/2022"
+output: 
+  html_document:
+    code_folding: show                  
+    depth: 6
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: cerulean
+    toc: yes
+    toc_float:
+      collapsed: True
+      smooth_scroll: True
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(results = "markup", fig.align = "center",dev = 'svg',
+                      fig.height= 8, fig.width= 8,message=FALSE,warning=FALSE)
+```
+
+
+```{r library loading}
+require(dplyr)
+require(pheatmap)
+require(stringr)
+require(reshape2)
+require(caret)
+require(lubridate)
+require(readxl)
+require(ggplot2)
+require(quanteda)
+require(corrplot)
+require(philentropy)
+require(jsonlite)
+
+# Ingest the configuration file
+config <- fromJSON("config.json")
+```
+
+
+## Goals
+
+1. Reasonably automate ingestion of the most recent 510(k) data from the public database:
+
+https://www.fda.gov/medical-devices/510k-clearances/downloadable-510k-files
+
+2. Make the analytical decision: when to start an analytical data set? e.g: MDUFA 1 ?
+
+3. Make the analytical decision: focus only on traditional 510(k)s.
+
+
+## Reasonably automate ingestion of the most recent 510(k) data from the public database
+
+
+```{r data ingestion}
+# download the most recent data (it comes zipped)
+download.file(url = config$most_recent_501k_data_path,
+              destfile = "../data/most_recent_data.zip")
+# unzip
+unzip("../data/most_recent_data.zip",exdir = "../data")
+# delete compressed directory
+unlink("../data/most_recent_data.zip")
+data.filename <- gsub("\\.zip","\\.txt",basename(config$most_recent_501k_data_path)) 
+
+# load the flat file
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+```
+
+
+## Make the analytical decision: when to start an analytical data set?
+
+Data dictionary for the main dataset: 
+
+https://www.fda.gov/medical-devices/510k-clearances/file-layout-releasable-510ks
+
+
+
+```{r data cut off, fig.width=15, fig.height=5}
+# load the flat file
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+# define DECISION_TIME_DAYS
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS)
+         )
+
+data_summary <- data_510k %>%
+  mutate(MARK_MONTH = floor_date(DECISIONDATE,"month"))%>%
+  group_by(MARK_MONTH)%>%
+  summarise(MEDIAN_DECISION_TIME_MONTHLY = median(DECISION_TIME_DAYS_LOG10))
+
+ggplot(data_510k %>%
+         filter(THIRDPARTY == 'N' & TYPE == "Traditional") %>%
+         mutate(MARK_MONTH = floor_date(DECISIONDATE,"month"))%>%
+         left_join(data_summary),aes(x = DECISIONDATE, y = DECISION_TIME_DAYS_LOG10))+
+  geom_point(color = "navy", alpha = 0.05, size = 0.9)+
+  geom_line(aes(x = MARK_MONTH, y = MEDIAN_DECISION_TIME_MONTHLY), color = "magenta", size = 2)+ 
+  geom_vline(xintercept = mdy("10-01-2002"), color = "red")+ # https://www.fda.gov/industry/fda-user-fee-programs/medical-device-user-fee-amendments-mdufa
+  geom_vline(xintercept = mdy("10-01-2007"), color = "red")+ # MDUFA II
+  geom_vline(xintercept = mdy("10-01-2012"), color = "red")+ # MDUFA III
+  geom_vline(xintercept = mdy("10-01-2017"), color = "red")+ # MDUFA IV
+  theme_bw()+
+  theme(panel.background = element_rect(fill = "#f7edfa"))
+```
+
+Based on the observations, it would be sensible to limit the analytical data set starting from FY 2007 (MDUFA II and beyond).
+
+
+## Make the analytical decision: focus only on traditional 510(k)s
+
+
+
+
+- Remove special 510(k)s
+- Remove DeNovos
+- Remove Third Party 510(k)s
+
+
+
+
+
+
+
+
