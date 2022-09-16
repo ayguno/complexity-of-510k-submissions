@@ -51,6 +51,8 @@ https://www.fda.gov/medical-devices/510k-clearances/downloadable-510k-files
 
 3. Make the analytical decision: focus only on traditional 510(k)s.
 
+4. Define response variable for the classification problem.
+
 
 ## Reasonably automate ingestion of the most recent 510(k) data from the public database
 
@@ -96,7 +98,7 @@ data_summary <- data_510k %>%
   summarise(MEDIAN_DECISION_TIME_MONTHLY = median(DECISION_TIME_DAYS_LOG10))
 
 ggplot(data_510k %>%
-         filter(THIRDPARTY == 'N' & TYPE == "Traditional") %>%
+         filter(THIRDPARTY == 'N' & TYPE == "Traditional" & DECISION == "SESE") %>%
          mutate(MARK_MONTH = floor_date(DECISIONDATE,"month"))%>%
          left_join(data_summary),aes(x = DECISIONDATE, y = DECISION_TIME_DAYS_LOG10))+
   geom_point(color = "navy", alpha = 0.05, size = 0.9)+
@@ -114,17 +116,54 @@ Based on the observations, it would be sensible to limit the analytical data set
 
 ## Make the analytical decision: focus only on traditional 510(k)s
 
-
-
+What fraction of data we would be filtering when we: 
 
 - Remove special 510(k)s
-- Remove DeNovos
+- Remove DeNovos and only keep SESE decisions
 - Remove Third Party 510(k)s
 
 
 
+```{r data filtering and its impact, fig.width=15, fig.height=5}
+# load the flat file
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE) %>%
+  mutate(DECISIONDATE = mdy(DECISIONDATE))
+
+summarize_data <- function(att_name,df){
+  data_summary <- table(df[att_name]) %>% 
+  rbind(100*table(df[att_name])/nrow(df))
+  rownames(data_summary) <- c("Total","Percent")
+  print(att_name)
+  print(round(data_summary,2))
+}
+
+# Distribution of different 510(k)s and decision codes
+summarize_data(att_name = "THIRDPARTY", df = data_510k %>% filter(DECISIONDATE >= mdy("10-01-2007")))
+summarize_data(att_name = "TYPE", df = data_510k %>% filter(DECISIONDATE >= mdy("10-01-2007")))
+summarize_data(att_name = "DECISION", df = data_510k %>% filter(DECISIONDATE >= mdy("10-01-2007")))
 
 
+
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+# append into processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS)
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") # Retain records with SESE decisions
+         
+
+print(paste0(nrow(data_510k), " traditional, non-third party 510(k) records with SESE decision codes and decision date after FY 2007."))
+```
+
+
+## Define response variable for classification
 
 
 
