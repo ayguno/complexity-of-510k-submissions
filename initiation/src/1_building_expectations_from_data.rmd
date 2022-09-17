@@ -116,6 +116,7 @@ Based on the observations, it would be sensible to limit the analytical data set
 
 ## Make the analytical decision: focus only on traditional 510(k)s
 
+
 What fraction of data we would be filtering when we: 
 
 - Remove special 510(k)s
@@ -166,4 +167,22 @@ print(paste0(nrow(data_510k), " traditional, non-third party 510(k) records with
 ## Define response variable for classification
 
 
+```{r response variable definition}
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+# established processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS)
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") # Retain records with SESE decisions
+
+hist(data_510k$DECISION_TIME_DAYS_LOG10, breaks = 250, col = "navy", border = "navy")
+plot(density(data_510k$DECISION_TIME_DAYS_LOG10), col = "navy")
+```
 
