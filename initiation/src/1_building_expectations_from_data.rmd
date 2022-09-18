@@ -53,6 +53,8 @@ https://www.fda.gov/medical-devices/510k-clearances/downloadable-510k-files
 
 4. Define response variable for the classification problem.
 
+5. Explore and engineer potential features that could be useful for the problem. (Note that these would be relatively simple features that could be engineered using a small subset, without causing data leakage. More complex feature engineering that requires a training pipeline will be performed in modeling experiments).
+
 
 ## Reasonably automate ingestion of the most recent 510(k) data from the public database
 
@@ -183,6 +185,167 @@ data_510k <- data_510k %>%
          DECISION == "SESE") # Retain records with SESE decisions
 
 hist(data_510k$DECISION_TIME_DAYS_LOG10, breaks = 250, col = "navy", border = "navy")
-plot(density(data_510k$DECISION_TIME_DAYS_LOG10), col = "navy")
+abline(v = log10(90), col = "magenta")
+abline(v = log10(265), col = "magenta")
+plot(density(data_510k$DECISION_TIME_DAYS_LOG10), col = "navy", lwd = 2)
+abline(v = log10(90), col = "magenta")
+abline(v = log10(265), col = "magenta")
 ```
+
+It appears that decision time displays a bimodal distribution (perhaps another mode is emerging between 1.5 - 2), one corresponds to day 90 and another corresponds to day 265. Based on this distribution, we may try to classify 510(k) submission COMPLEXITY as:
+
+- LOW (L): low complexity, DECISION_TIME_DAYS <= 90
+- MEDIUM (M): medium complexity, 90 < DECISION_TIME_DAYS <= 265
+- HIGH (H): high complexity, 265 < DECISION_TIME_DAYS 
+
+
+```{r response variable complexity definition, fig.height= 6, fig.width=15}
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+# append into processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS),
+         COMPLEXITY = ifelse(DECISION_TIME_DAYS <= 90,"L",
+                             ifelse(DECISION_TIME_DAYS <= 265,"M","H")) # Define COMPLEXITY based on DECISION_TIME_DAYS
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") # Retain records with SESE decisions
+
+
+
+# Summarize
+summarize_data <- function(att_name,df){
+  data_summary <- table(df[att_name]) %>% 
+  rbind(100*table(df[att_name])/nrow(df))
+  rownames(data_summary) <- c("Total","Percent")
+  print(att_name)
+  print(round(data_summary,2))
+}
+
+summarize_data("COMPLEXITY",data_510k)
+
+
+data_summary <- data_510k %>%
+  mutate(MARK_QUARTER = floor_date(DECISIONDATE,"quarter")) %>%
+  group_by(MARK_QUARTER, COMPLEXITY) %>%
+  summarise(counts = n())
+
+ggplot(data_summary,aes(MARK_QUARTER, counts, group = COMPLEXITY))+
+  geom_line(aes(color = COMPLEXITY))+
+  geom_point(aes(color = COMPLEXITY))+
+  scale_color_discrete()+
+  theme_bw()+
+  theme(panel.background = element_rect(fill = "#f7edfa"))
+
+```
+
+It appears all classes have representation across the time-axis. Interesting to note that number of high complexity submissions have been increasing over time.
+
+
+## Explore and engineer potential features that could be useful for the problem
+
+
+For this analysis, use a portion of data up to 2017 (considering a potential training set along the time axis), in order to avoid using entire data for exploration.
+
+
+### PRODUCTCODE Perspective
+
+Are there any PRODUCTCODE categories that could be predictive of COMPLEXITY?
+
+
+```{r feature engineering PRODUCTCODE Perspective, fig.height= 6, fig.width=15}
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+################################################################################
+# established processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS),
+         COMPLEXITY = ifelse(DECISION_TIME_DAYS <= 90,"L",
+                             ifelse(DECISION_TIME_DAYS <= 265,"M","H")) # Define COMPLEXITY based on DECISION_TIME_DAYS
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") # Retain records with SESE decisions
+################################################################################
+
+# Data for exploration (<=2017)
+data_explore <- data_510k %>% filter(year(DECISIONDATE) <= 2017)
+
+data_summary <- data_explore %>%
+  group_by(PRODUCTCODE, COMPLEXITY) %>%
+  summarise(counts_complexity = n()) %>%
+  left_join(data_explore %>%
+              group_by(PRODUCTCODE) %>%
+              summarise(counts_total = n())
+              ) %>%
+  mutate(compexity_total_ratio = counts_complexity/counts_total) %>%
+  filter(counts_total >=100) %>% # Only focus on product codes with 100 or more submissions observed within this exploratory data set
+  left_join(data_explore %>%
+              group_by(COMPLEXITY) %>%
+              summarise(class_prevalance = n()/nrow(data_explore))
+              ) %>%
+  mutate(observed_minus_expected = compexity_total_ratio - class_prevalance,
+         abs_observed_minus_expected = abs(observed_minus_expected))
+
+ggplot(data_summary,aes(reorder(PRODUCTCODE,abs_observed_minus_expected), observed_minus_expected))+
+  geom_bar(aes(fill = COMPLEXITY), stat = "identity")+
+  scale_fill_discrete()+
+  coord_flip()+
+  facet_wrap(. ~ COMPLEXITY, scales = "free")+
+  theme_bw()+
+  theme(panel.background = element_rect(fill = "#f7edfa"))
+
+hist(data_summary$abs_observed_minus_expected, breaks = 20, col = "navy")
+
+# Potential PRODUCTCODE features using a threshold of abs_observed_minus_expected >= 0.2
+product_code_influencers <- data_summary %>% filter(abs_observed_minus_expected >= 0.2) %>% 
+  select(PRODUCTCODE) %>% distinct()
+print(paste0(paste0(product_code_influencers$PRODUCTCODE, collapse = " "),
+             " are product codes that could be predictive for 510(k) COMPLEXITY."))
+
+# Generate binary/dummy variables representing these product codes
+
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+################################################################################
+# established processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS),
+         COMPLEXITY = ifelse(DECISION_TIME_DAYS <= 90,"L",
+                             ifelse(DECISION_TIME_DAYS <= 265,"M","H")) # Define COMPLEXITY based on DECISION_TIME_DAYS
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") %>% # Retain records with SESE decisions
+  mutate(PRODUCTCODE_IYE = ifelse(PRODUCTCODE == "IYE",1,0),
+         PRODUCTCODE_IYN = ifelse(PRODUCTCODE == "IYN",1,0),
+         PRODUCTCODE_JJX = ifelse(PRODUCTCODE == "JJX",1,0),
+         PRODUCTCODE_LYZ = ifelse(PRODUCTCODE == "LYZ",1,0),
+         PRODUCTCODE_NBW = ifelse(PRODUCTCODE == "NBW",1,0),
+         )
+################################################################################
+
+
+```
+
+
+### CLASSADVISECOMM Perspective
+
+Are there any CLASSADVISECOMM categories that could be predictive of COMPLEXITY?
+
+
+
 
