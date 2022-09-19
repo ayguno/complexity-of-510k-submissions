@@ -348,4 +348,105 @@ Are there any CLASSADVISECOMM categories that could be predictive of COMPLEXITY?
 
 
 
+```{r feature engineering CLASSADVISECOMM Perspective, fig.height= 6, fig.width=15}
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+################################################################################
+# established processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS),
+         COMPLEXITY = ifelse(DECISION_TIME_DAYS <= 90,"L",
+                             ifelse(DECISION_TIME_DAYS <= 265,"M","H")) # Define COMPLEXITY based on DECISION_TIME_DAYS
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") %>% # Retain records with SESE decisions
+  mutate(PRODUCTCODE_IYE = ifelse(PRODUCTCODE == "IYE",1,0),
+         PRODUCTCODE_IYN = ifelse(PRODUCTCODE == "IYN",1,0),
+         PRODUCTCODE_JJX = ifelse(PRODUCTCODE == "JJX",1,0),
+         PRODUCTCODE_LYZ = ifelse(PRODUCTCODE == "LYZ",1,0),
+         PRODUCTCODE_NBW = ifelse(PRODUCTCODE == "NBW",1,0),
+         )
+################################################################################
+
+# Data for exploration (<=2017)
+data_explore <- data_510k %>% filter(year(DECISIONDATE) <= 2017)
+
+data_summary <- data_explore %>%
+  group_by(CLASSADVISECOMM, COMPLEXITY) %>%
+  summarise(counts_complexity = n()) %>%
+  left_join(data_explore %>%
+              group_by(CLASSADVISECOMM) %>%
+              summarise(counts_total = n())
+              ) %>%
+  mutate(compexity_total_ratio = counts_complexity/counts_total) %>%
+  filter(counts_total >=100) %>% # Only focus on CLASSADVISECOMM with 100 or more submissions observed within this exploratory data set
+  left_join(data_explore %>%
+              group_by(COMPLEXITY) %>%
+              summarise(class_prevalance = n()/nrow(data_explore))
+              ) %>%
+  mutate(observed_minus_expected = compexity_total_ratio - class_prevalance,
+         abs_observed_minus_expected = abs(observed_minus_expected))
+
+ggplot(data_summary,aes(reorder(CLASSADVISECOMM,abs_observed_minus_expected), observed_minus_expected))+
+  geom_bar(aes(fill = COMPLEXITY), stat = "identity")+
+  scale_fill_discrete()+
+  coord_flip()+
+  facet_wrap(. ~ COMPLEXITY, scales = "free")+
+  theme_bw()+
+  theme(panel.background = element_rect(fill = "#f7edfa"))
+
+hist(data_summary$abs_observed_minus_expected, breaks = 20, col = "navy")
+
+# Potential CLASSADVISECOMM features using a threshold of abs_observed_minus_expected >= 0.15
+product_code_influencers <- data_summary %>% filter(abs_observed_minus_expected >= 0.15) %>% 
+  select(CLASSADVISECOMM) %>% distinct()
+print(paste0(paste0(product_code_influencers$CLASSADVISECOMM, collapse = " "),
+             " are CLASSADVISECOMM that could be predictive for 510(k) COMPLEXITY."))
+
+# Generate binary/dummy variables representing these CLASSADVISECOMM
+
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+################################################################################
+# established processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS),
+         COMPLEXITY = ifelse(DECISION_TIME_DAYS <= 90,"L",
+                             ifelse(DECISION_TIME_DAYS <= 265,"M","H")) # Define COMPLEXITY based on DECISION_TIME_DAYS
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") %>% # Retain records with SESE decisions
+  mutate(PRODUCTCODE_IYE = ifelse(PRODUCTCODE == "IYE",1,0),
+         PRODUCTCODE_IYN = ifelse(PRODUCTCODE == "IYN",1,0),
+         PRODUCTCODE_JJX = ifelse(PRODUCTCODE == "JJX",1,0),
+         PRODUCTCODE_LYZ = ifelse(PRODUCTCODE == "LYZ",1,0),
+         PRODUCTCODE_NBW = ifelse(PRODUCTCODE == "NBW",1,0),
+         )%>%
+  mutate(CLASSADVISECOMM_AN = ifelse(PRODUCTCODE == "AN",1,0),
+         CLASSADVISECOMM_HE = ifelse(PRODUCTCODE == "HE",1,0),
+         CLASSADVISECOMM_IM = ifelse(PRODUCTCODE == "IM",1,0),
+         CLASSADVISECOMM_MI = ifelse(PRODUCTCODE == "MI",1,0),
+         CLASSADVISECOMM_RA = ifelse(PRODUCTCODE == "RA",1,0),
+         CLASSADVISECOMM_TX = ifelse(PRODUCTCODE == "TX",1,0),
+  )
+################################################################################
+
+
+```
+
+### DEVICENAME Perspective
+
+
+Are there any terms from DEVICENAME text that could be considered potentially predictive for COMPLEXITY?
+
 
