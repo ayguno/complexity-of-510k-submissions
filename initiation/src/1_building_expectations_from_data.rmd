@@ -530,4 +530,78 @@ data_summary_freq <- data_summary %>%
 None of the terms I analyzed from the device names displayed a noticeable enrichment of any COMPLEXITY class.
 
 
+### Do Principal Component Space of DEVICENAME document frequency matrix have any classification utility for COMPLEXITY?
+
+
+```{r feature engineering DEVICENAME Perspective PCA, fig.height= 10, fig.width=10, eval=FALSE}
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+################################################################################
+# established processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS),
+         COMPLEXITY = ifelse(DECISION_TIME_DAYS <= 90,"L",
+                             ifelse(DECISION_TIME_DAYS <= 265,"M","H")) # Define COMPLEXITY based on DECISION_TIME_DAYS
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") %>% # Retain records with SESE decisions
+  mutate(PRODUCTCODE_IYE = ifelse(PRODUCTCODE == "IYE",1,0),
+         PRODUCTCODE_IYN = ifelse(PRODUCTCODE == "IYN",1,0),
+         PRODUCTCODE_JJX = ifelse(PRODUCTCODE == "JJX",1,0),
+         PRODUCTCODE_LYZ = ifelse(PRODUCTCODE == "LYZ",1,0),
+         PRODUCTCODE_NBW = ifelse(PRODUCTCODE == "NBW",1,0),
+         )%>%
+  mutate(CLASSADVISECOMM_AN = ifelse(PRODUCTCODE == "AN",1,0),
+         CLASSADVISECOMM_HE = ifelse(PRODUCTCODE == "HE",1,0),
+         CLASSADVISECOMM_IM = ifelse(PRODUCTCODE == "IM",1,0),
+         CLASSADVISECOMM_MI = ifelse(PRODUCTCODE == "MI",1,0),
+         CLASSADVISECOMM_RA = ifelse(PRODUCTCODE == "RA",1,0),
+         CLASSADVISECOMM_TX = ifelse(PRODUCTCODE == "TX",1,0),
+  )
+################################################################################
+
+# Data for exploration (<=2017)
+data_explore <- data_510k %>% filter(year(DECISIONDATE) <= 2017)
+
+data_summary <- data_explore %>% select(COMPLEXITY,DEVICENAME)
+# Tokenize DEVICENAME and convert to document term frequency matrix
+gc()
+memory.limit(size= 60000)
+dtm <- dfm(tokens(data_summary$DEVICENAME, remove_punct = TRUE), remove_padding = TRUE)
+
+# Select top 200 features
+top_200 <- names(topfeatures(dtm, n = 200))
+dtm_top200 <- dtm[,top_200] %>% convert(to = "data.frame")
+
+gc()
+memory.limit(size= 1200000)
+dtm_pca <- prcomp(dtm_top200 %>% select(-doc_id), scale. = TRUE) 
+pcs <- dtm_pca$x
+
+colors_pca <- ifelse(data_summary$COMPLEXITY == "H","red", 
+                     ifelse(data_summary$COMPLEXITY == "L", "green","blue"))
+
+pairs(pcs[,1:5], pch = 16, cex = .75, 
+      col = scales::alpha(colors_pca,.2))
+
+pairs(pcs[,c(1,2)], pch = 16, cex = .75, 
+      col = scales::alpha(colors_pca,.2))
+
+```
+
+PCA generated features from DEVICENAME don't appear to be effective for this classification task.
+
+
+### APPLICANT perspective
+
+
+Do certain APPLICANT names display utility for COMPLEXITY classification?
+
+
+
 
