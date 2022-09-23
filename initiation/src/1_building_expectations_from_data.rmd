@@ -694,7 +694,8 @@ These terms are in very low frequency to infer whether their enrichment may be g
 ## Next steps
 
 
-- Prepare an automation script for data ingestion and preparation of the analytical data using the observations described here.
+- Prepare an automation script for data ingestion (COMPLETE)
+- preparation of the analytical data using the observations described here.
 - Make decisions on a modeling and validation framework (i.e: define training, validation and test sets).
 - Initiate experimentation phase: start building benchmark classifiers (just by minimal data integration and feature engineering) using the training set and estimate cross-validated performance.
 - Explore integrating additional data resources (e.g: summary/statements to uplift benchmark model performance)
