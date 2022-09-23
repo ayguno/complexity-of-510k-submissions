@@ -22,7 +22,7 @@ def download_data():
         config = json.load(f)
     print("Loaded configuration...")
     # download the most recent data (it comes zipped)
-    urllib.request.urlretrieve(config['most_recent_501k_data_path'],'../data/most_recent_data.zip')
+    urllib.request.urlretrieve(config['most_recent_510k_data_path'],'../data/most_recent_data.zip')
     print("Downloaded compressed data...")
     # unzip
     with zipfile.ZipFile('../data/most_recent_data.zip', 'r') as zip_ref:
