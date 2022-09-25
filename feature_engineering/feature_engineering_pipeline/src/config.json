@@ -1,5 +1,9 @@
 {
     "most_recent_510k_data_path":"https://www.accessdata.fda.gov/premarket/ftparea/pmn96cur.zip",
     "raw_510k_filename":"pmn96cur.txt",
-    "feature_store_dir":"../../feature_store/"
+    "feature_store_dir":"../../feature_store/",
+    "validation_data_start_year":"2019",
+    "validation_data_end_year":"2020",
+    "test_data_start_year":"2021",
+    "test_data_end_year":"2022"
 }
