@@ -1,1 +1,4 @@
 feature_engineering/feature_engineering_pipeline/src/__pycache__/download_510k_data.cpython-36.pyc
+*.pyc
+feature_engineering/feature_engineering_pipeline/src/__pycache__/download_510k_data.cpython-36.pyc
+*.csv
