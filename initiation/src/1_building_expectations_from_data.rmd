@@ -628,12 +628,12 @@ data_510k <- data_510k %>%
          PRODUCTCODE_LYZ = ifelse(PRODUCTCODE == "LYZ",1,0),
          PRODUCTCODE_NBW = ifelse(PRODUCTCODE == "NBW",1,0),
          )%>%
-  mutate(CLASSADVISECOMM_AN = ifelse(PRODUCTCODE == "AN",1,0),
-         CLASSADVISECOMM_HE = ifelse(PRODUCTCODE == "HE",1,0),
-         CLASSADVISECOMM_IM = ifelse(PRODUCTCODE == "IM",1,0),
-         CLASSADVISECOMM_MI = ifelse(PRODUCTCODE == "MI",1,0),
-         CLASSADVISECOMM_RA = ifelse(PRODUCTCODE == "RA",1,0),
-         CLASSADVISECOMM_TX = ifelse(PRODUCTCODE == "TX",1,0),
+  mutate(CLASSADVISECOMM_AN = ifelse(CLASSADVISECOMM == "AN",1,0),
+         CLASSADVISECOMM_HE = ifelse(CLASSADVISECOMM == "HE",1,0),
+         CLASSADVISECOMM_IM = ifelse(CLASSADVISECOMM == "IM",1,0),
+         CLASSADVISECOMM_MI = ifelse(CLASSADVISECOMM == "MI",1,0),
+         CLASSADVISECOMM_RA = ifelse(CLASSADVISECOMM == "RA",1,0),
+         CLASSADVISECOMM_TX = ifelse(CLASSADVISECOMM == "TX",1,0),
   )
 ################################################################################
 
@@ -695,8 +695,90 @@ These terms are in very low frequency to infer whether their enrichment may be g
 
 
 - Prepare an automation script for data ingestion (COMPLETE)
-- preparation of the analytical data using the observations described here.
-- Make decisions on a modeling and validation framework (i.e: define training, validation and test sets).
+- preparation of the analytical data using the observations described here (COMPLETE).
+- Make decisions on a modeling and validation framework (i.e: define training, validation and test sets) (COMPLETE).
+
+
+Since there is a time-axis, better to incorporate this into validation and performance estimation:
+
+
+```{r validation framework, fig.height= 18, fig.width=15, eval=FALSE}
+data_510k <- read.csv(paste0("../data/",data.filename), sep = "|", stringsAsFactors = FALSE)
+
+################################################################################
+# established processing steps
+data_510k <- data_510k %>%
+  mutate(DATERECEIVED = mdy(DATERECEIVED),
+         DECISIONDATE = mdy(DECISIONDATE),
+         DECISION_TIME_DAYS = as.numeric(DECISIONDATE - DATERECEIVED),# define DECISION_TIME_DAYS
+         DECISION_TIME_DAYS_LOG10 = log10(DECISION_TIME_DAYS),
+         COMPLEXITY = ifelse(DECISION_TIME_DAYS <= 90,"L",
+                             ifelse(DECISION_TIME_DAYS <= 265,"M","H")) # Define COMPLEXITY based on DECISION_TIME_DAYS
+         ) %>%
+  filter(DECISIONDATE >= mdy("10-01-2007")) %>% # Filter >= FY 2007 (MDUFA II)
+  filter(THIRDPARTY == 'N' & # Filter out 3rd party submissions
+         TYPE == "Traditional" & # Retain Traditional 510(k)s
+         DECISION == "SESE") %>% # Retain records with SESE decisions
+  mutate(PRODUCTCODE_IYE = ifelse(PRODUCTCODE == "IYE",1,0),
+         PRODUCTCODE_IYN = ifelse(PRODUCTCODE == "IYN",1,0),
+         PRODUCTCODE_JJX = ifelse(PRODUCTCODE == "JJX",1,0),
+         PRODUCTCODE_LYZ = ifelse(PRODUCTCODE == "LYZ",1,0),
+         PRODUCTCODE_NBW = ifelse(PRODUCTCODE == "NBW",1,0),
+         )%>%
+  mutate(CLASSADVISECOMM_AN = ifelse(CLASSADVISECOMM == "AN",1,0),
+         CLASSADVISECOMM_HE = ifelse(CLASSADVISECOMM == "HE",1,0),
+         CLASSADVISECOMM_IM = ifelse(CLASSADVISECOMM == "IM",1,0),
+         CLASSADVISECOMM_MI = ifelse(CLASSADVISECOMM == "MI",1,0),
+         CLASSADVISECOMM_RA = ifelse(CLASSADVISECOMM == "RA",1,0),
+         CLASSADVISECOMM_TX = ifelse(CLASSADVISECOMM == "TX",1,0),
+  )
+################################################################################
+
+data_summary <- data_510k %>%
+  mutate(mark_year = year(DECISIONDATE)) %>% 
+  group_by(mark_year, COMPLEXITY) %>%
+  summarise(counts = n()) %>% 
+  dcast(mark_year ~ COMPLEXITY) 
+
+data_summary$total <- data_summary %>%
+  select(-mark_year) %>%
+  apply(1,sum)
+
+data_summary <- data_summary %>%
+  mutate(data_set = ifelse(mark_year <= 2018,"training",
+                           ifelse(mark_year <= 2020,"validation","test"))) %>%
+  mutate(H_freq = round(H/total,2),
+         L_freq = round(L/total,2),
+         M_freq = round(M/total,2)
+         )
+
+print(data_summary)
+
+data_set_summary <- data_summary %>%
+  group_by(data_set) %>%
+  summarise(H = sum(H),
+            L = sum(L),
+            M = sum(M),
+            total = sum(total)) %>%
+  mutate(H_freq = round(H/total,2),
+         L_freq = round(L/total,2),
+         M_freq = round(M/total,2)
+         )
+
+print(data_set_summary)
+```
+
+Prepare held-out data sets such that:
+
+- The last two years worth of data will be held out test set (2021 and 2022)
+- The two years before the test set will be used as validation set (2019 - 2020)
+- The data up to the validation set will be used as training set (2007 - 2018)
+
+- Use KNUMBER to index these data sets, incorporate the split in to the feature engineering pipeline. (COMPLETE)
+
+
+
+
 - Initiate experimentation phase: start building benchmark classifiers (just by minimal data integration and feature engineering) using the training set and estimate cross-validated performance.
 - Explore integrating additional data resources (e.g: summary/statements to uplift benchmark model performance)
 
