@@ -1,0 +1,204 @@
+---
+title: '"Feature engineering experimentation"'
+author: "Ozan Aygun"
+date: "10/04/2022"
+output: 
+  html_document:
+    code_folding: show                  
+    depth: 6
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: cerulean
+    toc: yes
+    toc_float:
+      collapsed: True
+      smooth_scroll: True
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(results = "markup", fig.align = "center",dev = 'svg',
+                      fig.height= 8, fig.width= 8,message=FALSE,warning=FALSE)
+```
+
+
+```{r library loading}
+require(dplyr)
+require(pheatmap)
+require(stringr)
+require(reshape2)
+require(caret)
+require(lubridate)
+require(readxl)
+require(ggplot2)
+require(quanteda)
+require(corrplot)
+require(philentropy)
+require(jsonlite)
+
+# Ingest the configuration file
+config <- fromJSON("config.json")
+```
+
+
+## Goals
+
+
+Inspired from the observations of the Experiment 3 (i.e: feature importance list of the overfitting LGBM classifier). I wanted to ask whether we can further explore the text in the DEVICENAME to engineer features that could be potentially predictive for COMPLEXITY.
+
+## Ingest training data
+
+```{r data ingestion}
+analytical_data <- read.csv(paste0(config$feature_store_path,"analytical_data.csv"))
+train_index <- read.csv(paste0(config$feature_store_path,"train_KNUMBER.csv"))
+train_set <- analytical_data %>% filter(KNUMBER %in% train_index$KNUMBER)
+```
+
+
+## Tokenize DEVICENAME to monitor potentially "distant" features that may be predictive of COMPLEXITY
+
+Here I will take the following approach: 
+
+1. Use DEVICENAME as a corpus
+2. Tokenize (word, remove punctuation)
+3. Filter based on DF or TF-IDF (tune based on an objective)
+4. Use binary features for the selected terms (i.e: term exists in a particular DEVICENAME or not)
+5. Calculate relative frequency of HML (complexity subclasses) within each of these features, to yield an HML vector.
+6. Calculate relative frequency of HML (complexity subclasses) within the entire training set.
+7. Calculate pairwise euclidean distance of each feature HML freq vector with training set HML freq vector.
+8. Calculate the objective: median euclidean distance of all of these comparisons.
+9. Find the filter (Step 3) that maximizes the objective defined at Step 8.
+10. Repeat steps 1-7.
+11. Select Top N features that have highest HML distance from the HML vector for the entire training set.
+
+
+```{r, feature engineering and selection experiment 1}
+# Tokenize DEVICENAME and convert to document term frequency matrix
+gc()
+memory.limit(size= 60000)
+dtm <- dfm(tokens_wordstem(tokens_ngrams(tokens(train_set$DEVICENAME, remove_punct = TRUE), n=1:3)))
+
+top_feature_filter = seq(10,1000,length.out = 100) # tune
+median_distance <- rep(NA,length(top_feature_filter)) #objective
+total_distance <- rep(NA,length(top_feature_filter))
+median_df <- rep(NA,length(top_feature_filter)) # tune/observe
+
+# train_set HML complexity freq vector
+train_hml <- train_set %>% select(COMPLEXITY) %>% table() %>% data.frame() %>% 
+    mutate(train_set_freq = round(Freq/nrow(train_set),4)) 
+colnames(train_hml)[1] <- "COMPLEXITY"
+train_hml <- train_hml %>% select(COMPLEXITY,train_set_freq)
+
+for (i in seq_along(top_feature_filter)){
+    top <- top_feature_filter[i]
+    temp_features <- topfeatures(dtm,n = top)
+    median_df[i] <- median(temp_features)
+    temp_features <- dtm[,names(temp_features)] %>% 
+        data.frame() %>% cbind(train_set %>% select(COMPLEXITY)) %>%
+        select(-doc_id) %>% melt(id.var = "COMPLEXITY") %>%
+        group_by(variable,COMPLEXITY) %>%
+        summarise(total_comp = sum(value)) %>% data.frame()  
+    temp_features <- temp_features %>% 
+        left_join(temp_features %>% 
+                      group_by(variable) %>%
+                      summarise(total_variable = sum(total_comp)))%>%
+        mutate(freq = round(total_comp/total_variable,4),
+               feature = variable
+               )%>% select(COMPLEXITY,feature,freq)%>%
+        dcast(COMPLEXITY ~ feature, value.var = 'freq') %>% left_join(train_hml)
+    row.names(temp_features) <- temp_features$COMPLEXITY
+    temp_features <- temp_features %>% select(-COMPLEXITY) %>% as.matrix() %>% t()
+    temp_dist <- as.matrix(dist(temp_features,diag=TRUE, upper=TRUE))[,'train_set_freq']
+    median_distance[i] <- median(temp_dist)
+    total_distance[i] <- sum(temp_dist)
+    print(paste0("Processed top ",top," features. Median df: ",median_df[i],
+                 " Median dist: ", median_distance[i], 
+                 " Total dist: ",total_distance[i]))
+    
+}
+
+results <- data.frame(top_feature_filter = top_feature_filter,
+                      median_distance = median_distance,
+                      total_distance = total_distance,
+                      median_df = median_df,
+                      stringsAsFactors = FALSE)
+
+# Save experiment results 
+saveRDS(results,"../data/initiation_2_experiment_1.rds")
+```
+
+
+```{r, feature engineering and selection plots 1, fig.width=10, fig.height=10}
+par(mfrow = c(2,2))
+plot(x = round(((results$median_df)/nrow(train_set)) * 100,2), type = 'o', col = 'red', pch = 19,
+     y = results$median_distance, xlab = "median % of documents with selected features.",
+     ylab = "Median distance from reference HML vector")
+plot(x = results$top_feature_filter, type = 'o', col = 'magenta', pch = 19,
+     y = results$median_distance, xlab = "Number of selected features.",
+     ylab = "Median distance from reference HML vector")
+plot(x = results$top_feature_filter, type = 'o', col = 'navy', pch = 19,
+     y = results$total_distance, xlab = "Number of selected features.",
+     ylab = "Total distance from reference HML vector")
+plot(x = results$top_feature_filter, type = 'o', col = 'green', pch = 19,
+     y = round(((results$median_df)/nrow(train_set)) * 100,2), xlab = "Number of selected features.",
+     ylab = "median % of documents with selected features.")
+
+```
+
+Based on the observations above, it appears that features that are adding most dissimilarity are captured when we use a top feature filter of around 250. Beyond this point, the increase in the median distance to reference is noticeably slower. At the same time the median % of documents containing the resulting features are smaller than 0.5 % after that point (which may not provide generalizeable predictive utility).
+
+Hence, I will determine the feature filtering threshold such that the **median % of documents with the filtered features** won't be less than 0.5%. Afterwards, from this group, I will select the top 50 features that display the highest dissimilarity with the reference HML frequency vector calculated using the entire training set.
+
+
+```{r, feature engineering and selection implementation 1, fig.width= 20, fig.height=8}
+results <- readRDS("../data/initiation_2_experiment_1.rds")
+median_df_filter_perc <- 0.5
+topN <- 50
+
+results$median_df_perc_of_train_set <- round(((results$median_df)/nrow(train_set)) * 100,2)
+w <- which(results$median_df_perc_of_train_set >= median_df_filter_perc)
+top_feature_filter <- max(results$top_feature_filter[w])
+# Tokenize DEVICENAME and convert to document term frequency matrix
+gc()
+memory.limit(size= 60000)
+dtm <- dfm(tokens_wordstem(tokens_ngrams(tokens(train_set$DEVICENAME, remove_punct = TRUE), n=1:3)))
+# train_set HML complexity freq vector
+train_hml <- train_set %>% select(COMPLEXITY) %>% table() %>% data.frame() %>% 
+    mutate(train_set_freq = round(Freq/nrow(train_set),4)) 
+colnames(train_hml)[1] <- "COMPLEXITY"
+train_hml <- train_hml %>% select(COMPLEXITY,train_set_freq)
+
+
+top <- top_feature_filter
+temp_features <- topfeatures(dtm,n = top)
+   
+temp_features <- dtm[,names(temp_features)] %>% 
+        data.frame() %>% cbind(train_set %>% select(COMPLEXITY)) %>%
+        select(-doc_id) %>% melt(id.var = "COMPLEXITY") %>%
+        group_by(variable,COMPLEXITY) %>%
+        summarise(total_comp = sum(value)) %>% data.frame()  
+temp_features <- temp_features %>% 
+        left_join(temp_features %>% 
+                      group_by(variable) %>%
+                      summarise(total_variable = sum(total_comp)))%>%
+        mutate(freq = round(total_comp/total_variable,4),
+               feature = variable
+               )%>% select(COMPLEXITY,feature,freq)%>%
+        dcast(COMPLEXITY ~ feature, value.var = 'freq') %>% left_join(train_hml)
+row.names(temp_features) <- temp_features$COMPLEXITY
+temp_features <- temp_features %>% select(-COMPLEXITY) %>% as.matrix()
+pheatmap(temp_features, cluster_rows = F, cellwidth = 5, cellheight = 25, fontsize_col = 6, border_color = NA)
+
+
+temp_dist <- sort(as.matrix(dist(t(temp_features),diag=TRUE, upper=TRUE))[,'train_set_freq'],decreasing = TRUE)[1:topN]
+    
+pheatmap(temp_features[,c(names(temp_dist),'train_set_freq')], cluster_rows = F, 
+         cellwidth = 25, cellheight = 30, fontsize_col = 18, border_color = NA)
+    
+
+
+
+# Save experiment results 
+# saveRDS(results,"../data/initiation_2_experiment_1.rds")
+```
+ 
