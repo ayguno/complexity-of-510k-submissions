@@ -1,3 +1,4 @@
 {
-    "most_recent_501k_data_path":"https://www.accessdata.fda.gov/premarket/ftparea/pmn96cur.zip"
+    "most_recent_501k_data_path":"https://www.accessdata.fda.gov/premarket/ftparea/pmn96cur.zip",
+    "feature_store_path": "../feature_engineering/feature_store/"	
 }
