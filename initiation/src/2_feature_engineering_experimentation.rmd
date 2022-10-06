@@ -55,7 +55,7 @@ train_set <- analytical_data %>% filter(KNUMBER %in% train_index$KNUMBER)
 ```
 
 
-## Tokenize DEVICENAME to monitor potentially "distant" features that may be predictive of COMPLEXITY
+## Approach 1: Tokenize DEVICENAME to monitor potentially "distant" features that may be predictive of COMPLEXITY
 
 Here I will take the following approach: 
 
@@ -194,11 +194,41 @@ temp_dist <- sort(as.matrix(dist(t(temp_features),diag=TRUE, upper=TRUE))[,'trai
     
 pheatmap(temp_features[,c(names(temp_dist),'train_set_freq')], cluster_rows = F, 
          cellwidth = 25, cellheight = 30, fontsize_col = 18, border_color = NA)
-    
+  
+# The features can still benefit from consolidation (i.e: glucose may represent many other features) but 
+# there are also more complex term such as "vinyl" wihch may appear in slightly dissimilar featrures
 
-
-
-# Save experiment results 
-# saveRDS(results,"../data/initiation_2_experiment_1.rds")
+# Save names of selected features 
+saveRDS(names(temp_dist),"../data/initiation_2_experiment_1_selected_features.rds")
 ```
+ 
+ 
+Let's also examine whether consolidating these selected features using PCA may have any predictive skill:
+
+
+```{r, feature engineering and selection 1 pca explore, fig.width= 20, fig.height= 20}
+
+select_features <- dfm(tokens_select(tokens_wordstem(tokens_ngrams(tokens(train_set$DEVICENAME, remove_punct = TRUE), n=1:3)),
+                                 names(temp_dist))) %>% 
+  convert(to = "data.frame") %>%
+  select(-doc_id)
+
+pca_select <- prcomp(select_features, scale. = TRUE, center = TRUE)
+pcs <- pca_select$x
+
+colors_pca <- ifelse(train_set$COMPLEXITY == "H","red", 
+                     ifelse(train_set$COMPLEXITY == "L", "green","blue"))
+
+pairs(pcs[,1:10], cex = 1, 
+      col = scales::alpha(colors_pca,.2))
+
+```
+
+ 
+ There may be some potential in using PCA transformed version of these features as well.
+ 
+ 
+ 
+ 
+ 
  
