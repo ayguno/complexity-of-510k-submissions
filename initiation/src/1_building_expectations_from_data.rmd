@@ -779,7 +779,9 @@ Prepare held-out data sets such that:
 
 
 
-- Initiate experimentation phase: start building benchmark classifiers (just by minimal data integration and feature engineering) using the training set and estimate cross-validated performance.
+- Initiate experimentation phase: start building benchmark classifiers (just by minimal data integration and feature engineering) using the training set and estimate cross-validated performance.(COMPLETE: Experiments 1- 3)
+
+
 - Explore integrating additional data resources (e.g: summary/statements to uplift benchmark model performance)
 
 
