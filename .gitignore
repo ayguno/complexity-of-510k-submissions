@@ -2,3 +2,8 @@ feature_engineering/feature_engineering_pipeline/src/__pycache__/download_510k_d
 *.pyc
 feature_engineering/feature_engineering_pipeline/src/__pycache__/download_510k_data.cpython-36.pyc
 *.csv
+*.ipynb
+*.pkl
+initiation/src/.Rhistory
+initiation/src/.Rhistory
+*.rds
