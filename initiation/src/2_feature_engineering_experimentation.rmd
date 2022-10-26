@@ -72,7 +72,7 @@ Here I will take the following approach:
 11. Select Top N features that have highest HML distance from the HML vector for the entire training set.
 
 
-```{r, feature engineering and selection experiment 1}
+```{r, feature engineering and selection experiment 1, eval=FALSE}
 # Tokenize DEVICENAME and convert to document term frequency matrix
 gc()
 memory.limit(size= 60000)
@@ -228,7 +228,187 @@ pairs(pcs[,1:10], cex = 1,
  There may be some potential in using PCA transformed version of these features as well.
  
  
+## Approach 2: Tokenize DEVICENAME to monitor potentially "distant" features that may be predictive of COMPLEXITY through LOG10_DECISION_TIME
+
+Here I will take the following approach: 
+
+1. Use DEVICENAME as a corpus
+2. Tokenize (word, remove punctuation)
+3. Filter based on DF or TF-IDF (tune based on an objective)
+4. Use binary features for the selected terms (i.e: term exists in a particular DEVICENAME or not)
+5. Calculate relative distribution (e.g: fixed bins/histogram) of DECISION_TIME_LOG10 within each of these features, to yield a bin_vector.
+6. Calculate the same bin_vector for the entire training set.
+7. Calculate pairwise euclidean distance of each feature bin_vector with training set bin_vector.
+8. Calculate the objective: median euclidean distance of all of these comparisons.
+9. Find the filter (Step 3) that maximizes the objective defined at Step 8.
+10. Repeat steps 1-7.
+11. Select Top N features that have highest distance from the bin_vector for the entire training set.
+
+ 
+
+```{r, feature engineering and selection experiment 2, eval=FALSE}
+# Tokenize DEVICENAME and convert to document term frequency matrix
+gc()
+memory.limit(size= 60000)
+dtm <- dfm(tokens_wordstem(tokens_ngrams(tokens(train_set$DEVICENAME, remove_punct = TRUE), n=1:3)))
+
+top_feature_filter = seq(10,1000,length.out = 100) # tune
+median_distance <- rep(NA,length(top_feature_filter)) #objective
+total_distance <- rep(NA,length(top_feature_filter))
+median_df <- rep(NA,length(top_feature_filter)) # tune/observe
+
+# train_set DECISION_TIME_LOG10 bin_vector
+range_DECISION_TIME_LOG10 <- range(train_set$DECISION_TIME_DAYS_LOG10) # reference range
+bin_points <- round(seq(from = range_DECISION_TIME_LOG10[1], to = range_DECISION_TIME_LOG10[2], length.out = 100),4)
+train_bins <- table(cut(train_set$DECISION_TIME_DAYS_LOG10,breaks = bin_points)) %>% t() %>% data.frame() %>% 
+    mutate(bins = bin_points[2:length(bin_points)],
+      train_set_freq = round(Freq/nrow(train_set),4)) %>%
+  select(bins, train_set_freq)
+
+
+for (i in seq_along(top_feature_filter)){
+    top <- top_feature_filter[i]
+    temp_features <- topfeatures(dtm,n = top)
+    median_df[i] <- median(temp_features)
+    temp_features <- dtm[,names(temp_features)] %>% 
+        convert(to = 'data.frame') %>% cbind(train_set %>% select(DECISION_TIME_DAYS_LOG10)) %>%
+        select(-doc_id) %>% melt(id.var = "DECISION_TIME_DAYS_LOG10") %>%
+      filter(value == 1) %>%
+      mutate(variable = as.character(variable))
+    
+    variables <- unique(temp_features$variable)
+    
+    temp_bins <- data.frame(bins = bin_points[2:length(bin_points)], stringsAsFactors = FALSE)
+    for (v in seq_along(variables)){
+      temp_bin <- temp_features %>% filter(variable == variables[v])
+      temp_bin <- table(cut(temp_bin$DECISION_TIME_DAYS_LOG10,breaks = bin_points)) %>% t() %>% data.frame() %>% 
+                  mutate(bins = bin_points[2:length(bin_points)],
+                  temp_bin_freq = round(Freq/nrow(temp_bin),4)) %>%
+                  select(bins, temp_bin_freq)
+      colnames(temp_bin)[2] <- variables[v]
+      temp_bins <- left_join(temp_bins, temp_bin, by = "bins")
+    }
+    
+    temp_bins <- left_join(temp_bins,train_bins, by = "bins")
+    row.names(temp_bins) <- temp_bins$bins
+    temp_features <- temp_bins %>% select(-bins) %>% as.matrix() %>% t()
+    temp_dist <- as.matrix(dist(temp_features,diag=TRUE, upper=TRUE))[,'train_set_freq']
+    median_distance[i] <- median(temp_dist)
+    total_distance[i] <- sum(temp_dist)
+    print(paste0("Processed top ",top," features. Median df: ",median_df[i],
+                 " Median dist: ", median_distance[i], 
+                 " Total dist: ",total_distance[i]))
+    
+}
+
+results <- data.frame(top_feature_filter = top_feature_filter,
+                      median_distance = median_distance,
+                      total_distance = total_distance,
+                      median_df = median_df,
+                      stringsAsFactors = FALSE)
+
+# Save experiment results 
+saveRDS(results,"../data/initiation_2_experiment_2.rds")
+```
+ 
+ 
+```{r, feature engineering and selection plots 2, fig.width=10, fig.height=10}
+par(mfrow = c(2,2))
+plot(x = round(((results$median_df)/nrow(train_set)) * 100,2), type = 'o', col = 'red', pch = 19,
+     y = results$median_distance, xlab = "median % of documents with selected features.",
+     ylab = "Median distance from reference vector")
+plot(x = results$top_feature_filter, type = 'o', col = 'magenta', pch = 19,
+     y = results$median_distance, xlab = "Number of selected features.",
+     ylab = "Median distance from reference vector")
+plot(x = results$top_feature_filter, type = 'o', col = 'navy', pch = 19,
+     y = results$total_distance, xlab = "Number of selected features.",
+     ylab = "Total distance from reference vector")
+plot(x = results$top_feature_filter, type = 'o', col = 'green', pch = 19,
+     y = round(((results$median_df)/nrow(train_set)) * 100,2), xlab = "Number of selected features.",
+     ylab = "median % of documents with selected features.")
+
+```
  
  
  
+```{r, feature engineering and selection implementation 2, fig.width= 20, fig.height=8}
+results <- readRDS("../data/initiation_2_experiment_2.rds")
+median_df_filter_perc <- 0.5
+topN <- 50
+
+results$median_df_perc_of_train_set <- round(((results$median_df)/nrow(train_set)) * 100,2)
+w <- which(results$median_df_perc_of_train_set >= median_df_filter_perc)
+top_feature_filter <- max(results$top_feature_filter[w])
+# Tokenize DEVICENAME and convert to document term frequency matrix
+gc()
+memory.limit(size= 60000)
+dtm <- dfm(tokens_wordstem(tokens_ngrams(tokens(train_set$DEVICENAME, remove_punct = TRUE), n=1:3)))
+
+
+# train_set DECISION_TIME_LOG10 bin_vector
+range_DECISION_TIME_LOG10 <- range(train_set$DECISION_TIME_DAYS_LOG10) # reference range
+bin_points <- round(seq(from = range_DECISION_TIME_LOG10[1], to = range_DECISION_TIME_LOG10[2], length.out = 100),4)
+train_bins <- table(cut(train_set$DECISION_TIME_DAYS_LOG10,breaks = bin_points)) %>% t() %>% data.frame() %>% 
+    mutate(bins = bin_points[2:length(bin_points)],
+      train_set_freq = round(Freq/nrow(train_set),4)) %>%
+  select(bins, train_set_freq)
+
+
+top <- top_feature_filter
+ temp_features <- topfeatures(dtm,n = top)
+    temp_features <- dtm[,names(temp_features)] %>% 
+        convert(to = 'data.frame') %>% cbind(train_set %>% select(DECISION_TIME_DAYS_LOG10)) %>%
+        select(-doc_id) %>% melt(id.var = "DECISION_TIME_DAYS_LOG10") %>%
+      filter(value == 1) %>%
+      mutate(variable = as.character(variable))
+    
+    variables <- unique(temp_features$variable)
+    
+    temp_bins <- data.frame(bins = bin_points[2:length(bin_points)], stringsAsFactors = FALSE)
+    for (v in seq_along(variables)){
+      temp_bin <- temp_features %>% filter(variable == variables[v])
+      temp_bin <- table(cut(temp_bin$DECISION_TIME_DAYS_LOG10,breaks = bin_points)) %>% t() %>% data.frame() %>% 
+                  mutate(bins = bin_points[2:length(bin_points)],
+                  temp_bin_freq = round(Freq/nrow(temp_bin),4)) %>%
+                  select(bins, temp_bin_freq)
+      colnames(temp_bin)[2] <- variables[v]
+      temp_bins <- left_join(temp_bins, temp_bin, by = "bins")
+    }
+    
+    temp_bins <- left_join(temp_bins,train_bins, by = "bins")
+    row.names(temp_bins) <- temp_bins$bins
+    
+    
+    
+    temp_features <- temp_bins %>% select(-bins) %>% as.matrix() 
+pheatmap(temp_features, cluster_rows = F, cellwidth = 5, cellheight = 25, fontsize_col = 6, border_color = NA)
+
+
+temp_dist <- sort(as.matrix(dist(t(temp_features),diag=TRUE, upper=TRUE))[,'train_set_freq'],decreasing = TRUE)[1:topN]
+    
+pheatmap(t(temp_features[,c(names(temp_dist),'train_set_freq')]), cluster_cols = F, 
+         cellwidth = 10, cellheight = 10, fontsize_row = 15, border_color = NA)
+  
+# The features can still benefit from consolidation (i.e: glucose may represent many other features) but 
+# there are also more complex term such as "vinyl" wihch may appear in slightly dissimilar featrures
+
+# Save names of selected features 
+saveRDS(names(temp_dist),"../data/initiation_2_experiment_2_selected_features.rds")
+```
  
+ 
+## Consolidate features
+ 
+
+At this point, let's try to prepare a feature union based on the shortlisted features from two approaches:
+
+```{r}
+f1 <- readRDS("../data/initiation_2_experiment_1_selected_features.rds")
+f2 <- readRDS("../data/initiation_2_experiment_2_selected_features.rds")
+
+f_union <- unique(c(f1,f2))
+
+# Export this feature list into token_list.csv to engineer and experiment features
+write.csv(data.frame(tokens = f_union, stringsAsFactors = FALSE),"../../feature_engineering/feature_store/token_list.csv",row.names = FALSE)
+```
+
