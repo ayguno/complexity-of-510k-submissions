@@ -408,7 +408,7 @@ f2 <- readRDS("../data/initiation_2_experiment_2_selected_features.rds")
 
 f_union <- unique(c(f1,f2))
 
-# Export this feature list into token_list.csv to engineer and experiment features
-write.csv(data.frame(tokens = f_union, stringsAsFactors = FALSE),"../../feature_engineering/feature_store/token_list.csv",row.names = FALSE)
+# Export this feature list into token_dict_DEVICENAME.csv to engineer and experiment features
+write.csv(data.frame(tokens = f_union, stringsAsFactors = FALSE),"../../feature_engineering/feature_store/token_dict_DEVICENAME.csv",row.names = FALSE)
 ```
 
